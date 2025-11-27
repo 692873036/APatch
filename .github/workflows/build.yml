@@ -110,4 +110,14 @@ jobs:
 
       # 标签构建时，发布到 GitHub Release（仅上传签名后的 APK）
       - name: Release signed apk
-        if: ${{
+        if: ${{ github.ref_type == 'tag' }}  # 补全语法闭合
+        continue-on-error: true
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ github.token }}
+          tag: ${{ github.ref_name }}
+          artifacts: app/build/outputs/apk/release/*-signed.apk
+          generateReleaseNotes: true
+          makeLatest: true
+          replacesArtifacts: true
+          name: 懒人听书 ${{ steps.parse_version.outputs.VERSION }}
