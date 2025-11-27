@@ -86,7 +86,6 @@ object APatchCli {
 }
 
 fun getRootShell(globalMnt: Boolean = false): Shell {
-
     return if (globalMnt) APatchCli.GLOBAL_MNT_SHELL else {
         APatchCli.SHELL
     }
@@ -250,7 +249,6 @@ fun runAPModuleAction(
 
 fun reboot(reason: String = "") {
     if (reason == "recovery") {
-        // KEYCODE_POWER = 26, hide incorrect "Factory data reset" message
         getRootShell().newJob().add("/system/bin/input keyevent 26").exec()
     }
     getRootShell().newJob()
@@ -321,71 +319,9 @@ fun getFileNameFromUri(context: Context, uri: Uri): String? {
     return fileName
 }
 
-@Suppress("DEPRECATION")
-private fun signatureFromAPI(context: Context): ByteArray? {
-    return try {
-        val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            context.packageManager.getPackageInfo(
-                context.packageName, PackageManager.GET_SIGNING_CERTIFICATES
-            )
-        } else {
-            context.packageManager.getPackageInfo(
-                context.packageName,
-                PackageManager.GET_SIGNATURES
-            )
-        }
+// 已移除所有签名校验相关函数（signatureFromAPI、signatureFromAPK、validateSignature）
 
-        val signatures: Array<out Signature>? =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                packageInfo.signingInfo?.apkContentsSigners
-            } else {
-                packageInfo.signatures
-            }
-
-        signatures?.firstOrNull()?.toByteArray()
-    } catch (e: Exception) {
-        e.printStackTrace()
-        null
-    }
-}
-
-private fun signatureFromAPK(context: Context): ByteArray? {
-    var signatureBytes: ByteArray? = null
-    try {
-        ZipFile(context.packageResourcePath).use { zipFile ->
-            val entries = zipFile.entries()
-            while (entries.hasMoreElements() && signatureBytes == null) {
-                val entry = entries.nextElement()
-                if (entry.name.matches("(META-INF/.*)\\.(RSA|DSA|EC)".toRegex())) {
-                    zipFile.getInputStream(entry).use { inputStream ->
-                        val certFactory = CertificateFactory.getInstance("X509")
-                        val x509Cert =
-                            certFactory.generateCertificate(inputStream) as X509Certificate
-                        signatureBytes = x509Cert.encoded
-                    }
-                }
-            }
-        }
-    } catch (e: Exception) {
-        e.printStackTrace()
-    }
-    return signatureBytes
-}
-
-private fun validateSignature(signatureBytes: ByteArray?, validSignature: String): Boolean {
-    signatureBytes ?: return false
-    val digest = MessageDigest.getInstance("SHA-256")
-    val signatureHash = Base64.encodeToString(digest.digest(signatureBytes), Base64.NO_WRAP)
-    return signatureHash == validSignature
-}
-
+// 彻底移除签名校验逻辑，直接返回true
 fun verifyAppSignature(validSignature: String): Boolean {
-    val context = apApp.applicationContext
-    val apkSignature = signatureFromAPK(context)
-    val apiSignature = signatureFromAPI(context)
-
-    return validateSignature(apiSignature, validSignature) && validateSignature(
-        apkSignature,
-        validSignature
-    )
+    return true
 }
