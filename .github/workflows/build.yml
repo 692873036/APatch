@@ -3,6 +3,10 @@ name: Build Manager
 on:
   workflow_call:
   workflow_dispatch:
+  push:
+    branches: [ '*' ]  # 代码推送自动触发构建
+  pull_request:
+    branches: [ '*' ]  # PR提交自动触发构建
 
 jobs:
   build-manager:
@@ -15,21 +19,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate dynamic version（自动读取原版版本号）
+      - name: Generate dynamic version（自动读取根项目managerVersionCode）
         id: parse_version
         run: |
-          # 自动读取项目中 app/build.gradle.kts 里的原版 versionCode
-          ORIGINAL_VERSION=$(grep -oP 'versionCode\s*=\s*\K\d+' app/build.gradle.kts)
+          # 从根项目build.gradle.kts提取原版managerVersionCode（适配项目结构）
+          ORIGINAL_VERSION=$(grep -oP 'val managerVersionCode: Int by rootProject.extra\s*=\s*\K\d+' ../build.gradle.kts)
           
-          # 读取失败时的兜底默认值（请替换为你的实际原版版本号）
+          # 读取失败兜底（请替换为你的实际原版版本号）
           if [[ -z "$ORIGINAL_VERSION" ]]; then
             ORIGINAL_VERSION="10200"
           fi
           
           # 直接使用原版版本号，不做任何修改
           VERSION="$ORIGINAL_VERSION"
-          
-          # 格式校验
           VERSION=$(echo "$VERSION" | tr -cd '[:alnum:]-._')
           echo "当前版本号（与原版一致）: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
@@ -71,7 +73,6 @@ jobs:
           ./gradlew clean assembleRelease -PAPP_VERSION="${{ steps.parse_version.outputs.VERSION }}"
           echo "BUILD_TOOL_VERSION=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)" >> $GITHUB_ENV
 
-      # 自动生成临时签名文件
       - name: Generate temporary keystore
         run: |
           keytool -genkeypair \
@@ -84,8 +85,7 @@ jobs:
             -keypass temp@123456 \
             -dname "CN=Temp, OU=APatch, O=Dev, L=Beijing, ST=Beijing, C=CN"
 
-      # 修复apksigner参数错误（--alias改为-alias）
-      - name: Sign APK with temporary keystore
+      - name: Sign APK with temporary keystore（修复apksigner参数）
         env:
           BUILD_TOOL_VERSION: ${{ env.BUILD_TOOL_VERSION }}
         run: |
@@ -95,7 +95,7 @@ jobs:
             --ks ./temp.keystore \
             --ks-pass pass:temp@123456 \
             --key-pass pass:temp@123456 \
-            -alias temp-apatch-alias \  # 修正为单横线-alias
+            -alias temp-apatch-alias \  # 已修正为单横线-alias
             --out "$SIGNED_APK" \
             "$UNSIGNED_APK"
           /usr/local/lib/android/sdk/build-tools/$BUILD_TOOL_VERSION/apksigner verify "$SIGNED_APK"
