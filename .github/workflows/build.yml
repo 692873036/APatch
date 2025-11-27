@@ -1,25 +1,9 @@
 name: Build Manager
 
 on:
-  push:
-    tags: [ "*" ]
-    branches: [ "main" ]
-    paths:
-      - '.github/workflows/build.yml'
-      - 'app/**'
-      - 'apd/**'
-      - 'build.gradle.kts'
-      - 'gradle/libs.versions.toml'
-  pull_request:
-    branches: [ "main" ]
-    paths:
-      - '.github/workflows/build.yml'
-      - 'app/**'
-      - 'apd/**'
-      - 'build.gradle.kts'
-      - 'gradle/libs.versions.toml'
+  # 移除 push/pull_request 自动触发规则，仅保留手动触发和工作流调用
   workflow_call:
-  workflow_dispatch:
+  workflow_dispatch:  # 手动触发核心配置
 
 jobs:
   build-manager:
@@ -30,13 +14,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # 拉取完整提交记录，用于生成版本号
 
-      - name: Generate version
+      - name: Generate dynamic version
         id: parse_version
         run: |
-          # 固定版本号为 888888（与应用名称适配）
-          VERSION=888888
+          # 动态版本号逻辑不变（标签优先，无标签则用分支-哈希-提交次数）
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
+          else
+            BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
+            COMMIT_HASH=$(git rev-parse --short HEAD)
+            COMMIT_COUNT=$(git rev-list --count HEAD)
+            VERSION="${BRANCH}-${COMMIT_HASH}-${COMMIT_COUNT}"
+          fi
+          VERSION=$(echo "$VERSION" | tr -cd '[:alnum:]-._')
           echo "Generated Version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
@@ -74,32 +66,33 @@ jobs:
           echo 'org.gradle.jvmargs=-Xmx2048m' >> gradle.properties
           echo 'android.native.buildOutput=verbose' >> gradle.properties
           sed -i 's/org.gradle.configuration-cache=true//g' gradle.properties
-          # 构建命令保持不变，APK名称由 build.gradle.kts 配置（已设为“懒人听书_888888”）
-          ./gradlew clean assembleRelease
+          ./gradlew clean assembleRelease -PAPP_VERSION="${{ steps.parse_version.outputs.VERSION }}"
           echo "BUILD_TOOL_VERSION=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)" >> $GITHUB_ENV
 
-      # 移除签名步骤（无密钥时无需执行）
       - name: Upload build artifact
         uses: actions/upload-artifact@v5
         with:
-          name: 懒人听书-888888  # 产物名称适配应用名称
-          path: app/build/outputs/apk/release/*.apk  # 直接上传未签名APK
+          name: 懒人听书-${{ steps.parse_version.outputs.VERSION }}
+          path: app/build/outputs/apk/release/*.apk
 
       - name: Post to channel
-        if: ${{github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.ref_type != 'tag'}}
+        if: ${{ github.ref == 'refs/heads/main' && github.ref_type != 'tag' }}
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          COMMIT_URL: ${{ github.event.head_commit.url }}
-          COMMIT_ID: ${{ github.event.head_commit.id }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || '手动触发构建' }}
+          COMMIT_URL: ${{ github.event.head_commit.url || github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+          COMMIT_ID: ${{ github.sha }}
+          VERSION: ${{ steps.parse_version.outputs.VERSION }}
         run: |
           if [ ! -z "${{ secrets.BOT_TOKEN }}" ]; then
             OUTPUT="app/build/outputs/apk/release"
-            export Release=$(find $OUTPUT -name "*.apk")
-            URL=$(python3 .github/scripts/telegram_url.py -1002058433411)
-            curl -v "$URL" -F Release=@${Release}
-            URL=$(python3 .github/scripts/telegram_url.py -1001910818234)
-            curl -v "$URL" -F Release=@${Release}
+            Release=$(find $OUTPUT -name "*.apk")
+            curl -v "$(python3 .github/scripts/telegram_url.py -1002058433411)" \
+              -F "document=@${Release}" \
+              -F "caption=懒人听书 新版本发布\n版本号：${VERSION}\n提交信息：${COMMIT_MESSAGE}\n提交链接：${COMMIT_URL}"
+            curl -v "$(python3 .github/scripts/telegram_url.py -1001910818234)" \
+              -F "document=@${Release}" \
+              -F "caption=懒人听书 新版本发布\n版本号：${VERSION}\n提交信息：${COMMIT_MESSAGE}\n提交链接：${COMMIT_URL}"
           fi
 
       - name: Release apk
@@ -108,8 +101,9 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           token: ${{ github.token }}
-          tag: 888888  # 固定发布标签
-          artifacts: app/build/outputs/apk/release/*.apk  # 发布未签名APK
+          tag: ${{ github.ref_name }}
+          artifacts: app/build/outputs/apk/release/*.apk
           generateReleaseNotes: true
           makeLatest: true
           replacesArtifacts: true
+          name: 懒人听书 ${{ steps.parse_version.outputs.VERSION }}
