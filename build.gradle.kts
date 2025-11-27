@@ -7,35 +7,44 @@ plugins {
     alias(libs.plugins.agp.lib) apply false
     alias(libs.plugins.kotlin) apply false
     alias(libs.plugins.kotlin.compose.compiler) apply false
-    // 解决kotlin-parcelize插件版本问题（仅添加这一行）
-    id("org.jetbrains.kotlin.plugin.parcelize") version libs.versions.kotlin get() apply false
 }
 
-// 全局配置（固定版本号为888888，与你的APatch项目适配）
 project.ext.set("kernelPatchVersion", "0.12.2")
+
 val androidMinSdkVersion = 26
 val androidTargetSdkVersion = 36
 val androidCompileSdkVersion = 36
 val androidBuildToolsVersion = "36.0.0"
 val androidCompileNdkVersion = "29.0.14206865"
-val managerVersionCode by extra(888888) // 固定版本号
-val managerVersionName by extra("888888") // 固定版本名
+val managerVersionCode by extra(getVersionCode())
+val managerVersionName by extra(getVersionName())
 val branchname by extra(getbranch())
-
-// 分支名称获取逻辑（保留原功能，异常时默认main）
 fun Project.exec(command: String) = providers.exec {
     commandLine(command.split(" "))
 }.standardOutput.asText.get().trim()
 
-fun getbranch(): String {
-    return try {
-        exec("git rev-parse --abbrev-ref HEAD").trim()
-    } catch (e: Exception) {
-        "main"
-    }
+fun getGitCommitCount(): Int {
+    return exec("git rev-list --count HEAD").trim().toInt()
 }
 
-// 版本号验证任务（可运行 ./gradlew printVersion 查看是否为888888）
+fun getGitDescribe(): String {
+    return exec("git rev-parse --verify --short HEAD").trim()
+}
+
+fun getVersionCode(): Int {
+    val commitCount = getGitCommitCount()
+    val major = 1
+    return major * 10000 + commitCount + 200
+}
+
+fun getbranch(): String {
+    return exec("git rev-parse --abbrev-ref HEAD").trim()
+}
+
+fun getVersionName(): String {
+    return getGitDescribe()
+}
+
 tasks.register("printVersion") {
     doLast {
         println("Version code: $managerVersionCode")
@@ -43,7 +52,6 @@ tasks.register("printVersion") {
     }
 }
 
-// 子项目全局配置（统一SDK版本，避免构建警告）
 subprojects {
     plugins.withType(AndroidBasePlugin::class.java) {
         extensions.configure(CommonExtension::class.java) {
