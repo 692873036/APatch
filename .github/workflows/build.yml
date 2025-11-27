@@ -1,14 +1,12 @@
-name: Build Manager
+name: Build Manager (Manual Trigger Only)
 on:
-  push:
-    branches: [ "main" ]
-    paths:
-      - '.github/workflows/build.yml'
-      - 'app/**'
-      - 'apd/**'
-      - 'build.gradle.kts'
-      - 'gradle/libs.versions.toml'
-  workflow_dispatch:
+  workflow_dispatch:  # 仅保留手动触发，移除 push 自动触发
+    inputs:
+      # 可选：添加手动触发时的自定义参数（如版本备注）
+      build_note:
+        description: 'Build note (optional)'
+        required: false
+        default: 'Manual build'
 
 jobs:
   build-manager:
@@ -71,5 +69,5 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: APatch-Unsigned-${{ steps.parse_version.outputs.VERSION }}
-          # 指向未签名的 Release APK（默认输出路径）
           path: app/build/outputs/apk/release/*.apk
+          retention-days: 30  # 可选：设置 artifacts 保留时间（默认90天）
