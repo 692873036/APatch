@@ -71,13 +71,8 @@ android {
         buildConfigField("String", "buildKPV", "\"$kernelPatchVersion\"")
 
         base.archivesName = "APatch_${managerVersionCode}_${managerVersionName}_on_${branchname}"
+        // 新增：设置应用对外的包名（改包名核心配置）
         applicationId = "bubei.tingshu"
-        
-        // 仅补充这3行：读取根项目的SDK版本和固定版本号
-        minSdk = rootProject.ext.get("androidMinSdkVersion") as Int
-        targetSdk = rootProject.ext.get("androidTargetSdkVersion") as Int
-        versionCode = managerVersionCode
-        versionName = managerVersionName
     }
 
     compileOptions {
