@@ -1,9 +1,8 @@
 name: Build Manager
 
 on:
-  # 移除 push/pull_request 自动触发规则，仅保留手动触发和工作流调用
   workflow_call:
-  workflow_dispatch:  # 手动触发核心配置
+  workflow_dispatch:
 
 jobs:
   build-manager:
@@ -14,12 +13,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0  # 拉取完整提交记录，用于生成版本号
+          fetch-depth: 0
 
       - name: Generate dynamic version
         id: parse_version
         run: |
-          # 动态版本号逻辑不变（标签优先，无标签则用分支-哈希-提交次数）
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
           else
@@ -69,41 +67,47 @@ jobs:
           ./gradlew clean assembleRelease -PAPP_VERSION="${{ steps.parse_version.outputs.VERSION }}"
           echo "BUILD_TOOL_VERSION=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)" >> $GITHUB_ENV
 
-      - name: Upload build artifact
+      # 新增：自动生成临时签名文件（有效期 10000 天，仅构建时使用）
+      - name: Generate temporary keystore
+        run: |
+          keytool -genkeypair \
+            -keystore ./temp.keystore \
+            -alias temp-apatch-alias \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass temp@123456 \
+            -keypass temp@123456 \
+            -dname "CN=Temp, OU=APatch, O=Dev, L=Beijing, ST=Beijing, C=CN"
+
+      # 新增：用临时签名给 APK 签名（支持直接安装到设备）
+      - name: Sign APK with temporary keystore
+        env:
+          BUILD_TOOL_VERSION: ${{ env.BUILD_TOOL_VERSION }}
+        run: |
+          # 找到未签名的 APK 文件
+          UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" ! -name "*-signed.apk")
+          # 签名输出路径
+          SIGNED_APK=$(echo "$UNSIGNED_APK" | sed 's/\.apk$/-signed.apk/')
+          # 使用 Android SDK 的 apksigner 工具签名
+          /usr/local/lib/android/sdk/build-tools/$BUILD_TOOL_VERSION/apksigner sign \
+            --ks ./temp.keystore \
+            --ks-pass pass:temp@123456 \
+            --key-pass pass:temp@123456 \
+            --alias temp-apatch-alias \
+            --out "$SIGNED_APK" \
+            "$UNSIGNED_APK"
+          # 验证签名是否成功
+          /usr/local/lib/android/sdk/build-tools/$BUILD_TOOL_VERSION/apksigner verify "$SIGNED_APK"
+          echo "Signed APK path: $SIGNED_APK"
+
+      # 上传签名后的 APK（可直接安装）
+      - name: Upload signed artifact
         uses: actions/upload-artifact@v5
         with:
-          name: 懒人听书-${{ steps.parse_version.outputs.VERSION }}
-          path: app/build/outputs/apk/release/*.apk
+          name: 懒人听书-${{ steps.parse_version.outputs.VERSION }}-signed
+          path: app/build/outputs/apk/release/*-signed.apk
 
-      - name: Post to channel
-        if: ${{ github.ref == 'refs/heads/main' && github.ref_type != 'tag' }}
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message || '手动触发构建' }}
-          COMMIT_URL: ${{ github.event.head_commit.url || github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
-          COMMIT_ID: ${{ github.sha }}
-          VERSION: ${{ steps.parse_version.outputs.VERSION }}
-        run: |
-          if [ ! -z "${{ secrets.BOT_TOKEN }}" ]; then
-            OUTPUT="app/build/outputs/apk/release"
-            Release=$(find $OUTPUT -name "*.apk")
-            curl -v "$(python3 .github/scripts/telegram_url.py -1002058433411)" \
-              -F "document=@${Release}" \
-              -F "caption=懒人听书 新版本发布\n版本号：${VERSION}\n提交信息：${COMMIT_MESSAGE}\n提交链接：${COMMIT_URL}"
-            curl -v "$(python3 .github/scripts/telegram_url.py -1001910818234)" \
-              -F "document=@${Release}" \
-              -F "caption=懒人听书 新版本发布\n版本号：${VERSION}\n提交信息：${COMMIT_MESSAGE}\n提交链接：${COMMIT_URL}"
-          fi
-
-      - name: Release apk
-        if: ${{ github.ref_type == 'tag' }}
-        continue-on-error: true
-        uses: ncipollo/release-action@v1
-        with:
-          token: ${{ github.token }}
-          tag: ${{ github.ref_name }}
-          artifacts: app/build/outputs/apk/release/*.apk
-          generateReleaseNotes: true
-          makeLatest: true
-          replacesArtifacts: true
-          name: 懒人听书 ${{ steps.parse_version.outputs.VERSION }}
+      # 标签构建时，发布到 GitHub Release（仅上传签名后的 APK）
+      - name: Release signed apk
+        if: ${{
