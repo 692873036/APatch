@@ -1,8 +1,6 @@
 name: 同步原仓库更新
 on:
-  schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
+  workflow_dispatch:  # 仅保留手动触发（点击“运行工作流”才执行）
 jobs:
   sync:
     runs-on: ubuntu-latest
