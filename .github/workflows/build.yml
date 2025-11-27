@@ -15,19 +15,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate dynamic version
+      - name: Generate dynamic version（自动读取原版版本号）
         id: parse_version
         run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
-          else
-            BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
-            COMMIT_HASH=$(git rev-parse --short HEAD)
-            COMMIT_COUNT=$(git rev-list --count HEAD)
-            VERSION="${BRANCH}-${COMMIT_HASH}-${COMMIT_COUNT}"
+          # 自动读取项目中 app/build.gradle.kts 里的原版 versionCode
+          ORIGINAL_VERSION=$(grep -oP 'versionCode\s*=\s*\K\d+' app/build.gradle.kts)
+          
+          # 读取失败时的兜底默认值（请替换为你的实际原版版本号）
+          if [[ -z "$ORIGINAL_VERSION" ]]; then
+            ORIGINAL_VERSION="10200"
           fi
+          
+          # 直接使用原版版本号，不做任何修改
+          VERSION="$ORIGINAL_VERSION"
+          
+          # 格式校验
           VERSION=$(echo "$VERSION" | tr -cd '[:alnum:]-._')
-          echo "Generated Version: $VERSION"
+          echo "当前版本号（与原版一致）: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Setup Java
@@ -67,7 +71,7 @@ jobs:
           ./gradlew clean assembleRelease -PAPP_VERSION="${{ steps.parse_version.outputs.VERSION }}"
           echo "BUILD_TOOL_VERSION=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)" >> $GITHUB_ENV
 
-      # 新增：自动生成临时签名文件（有效期 10000 天，仅构建时使用）
+      # 自动生成临时签名文件
       - name: Generate temporary keystore
         run: |
           keytool -genkeypair \
@@ -80,37 +84,31 @@ jobs:
             -keypass temp@123456 \
             -dname "CN=Temp, OU=APatch, O=Dev, L=Beijing, ST=Beijing, C=CN"
 
-      # 新增：用临时签名给 APK 签名（支持直接安装到设备）
+      # 修复apksigner参数错误（--alias改为-alias）
       - name: Sign APK with temporary keystore
         env:
           BUILD_TOOL_VERSION: ${{ env.BUILD_TOOL_VERSION }}
         run: |
-          # 找到未签名的 APK 文件
           UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" ! -name "*-signed.apk")
-          # 签名输出路径
           SIGNED_APK=$(echo "$UNSIGNED_APK" | sed 's/\.apk$/-signed.apk/')
-          # 使用 Android SDK 的 apksigner 工具签名
           /usr/local/lib/android/sdk/build-tools/$BUILD_TOOL_VERSION/apksigner sign \
             --ks ./temp.keystore \
             --ks-pass pass:temp@123456 \
             --key-pass pass:temp@123456 \
-            --alias temp-apatch-alias \
+            -alias temp-apatch-alias \  # 修正为单横线-alias
             --out "$SIGNED_APK" \
             "$UNSIGNED_APK"
-          # 验证签名是否成功
           /usr/local/lib/android/sdk/build-tools/$BUILD_TOOL_VERSION/apksigner verify "$SIGNED_APK"
           echo "Signed APK path: $SIGNED_APK"
 
-      # 上传签名后的 APK（可直接安装）
       - name: Upload signed artifact
         uses: actions/upload-artifact@v5
         with:
           name: 懒人听书-${{ steps.parse_version.outputs.VERSION }}-signed
           path: app/build/outputs/apk/release/*-signed.apk
 
-      # 标签构建时，发布到 GitHub Release（仅上传签名后的 APK）
       - name: Release signed apk
-        if: ${{ github.ref_type == 'tag' }}  # 补全语法闭合
+        if: ${{ github.ref_type == 'tag' }}
         continue-on-error: true
         uses: ncipollo/release-action@v1
         with:
