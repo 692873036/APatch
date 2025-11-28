@@ -15,8 +15,9 @@ plugins {
     id("kotlin-parcelize")
 }
 
-val managerVersionCode: Int by rootProject.extra
-val managerVersionName: String by rootProject.extra
+// 👇 核心修改：versionCode固定为888888，versionName保留原始读取方式
+val managerVersionCode = 888888 // 自定义固定版本号
+val managerVersionName: String by rootProject.extra // 保留从根项目读取versionName
 val branchname: String by rootProject.extra
 val kernelPatchVersion: String by rootProject.extra
 
@@ -71,8 +72,10 @@ android {
         buildConfigField("String", "buildKPV", "\"$kernelPatchVersion\"")
 
         base.archivesName = "APatch_${managerVersionCode}_${managerVersionName}_on_${branchname}"
-        // 新增：设置应用对外的包名（改包名核心配置）
-        applicationId = "bubei.tingshu"
+        applicationId = "bubei.tingshu" // 已修改的包名
+        // 👇 绑定固定的versionCode（888888）和原始方式的versionName
+        versionCode = managerVersionCode
+        versionName = managerVersionName
     }
 
     compileOptions {
