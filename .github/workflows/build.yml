@@ -1,8 +1,7 @@
 name: Build Manager (Manual Trigger Only)
 on:
-  workflow_dispatch:  # 仅保留手动触发，移除 push 自动触发
+  workflow_dispatch:  # 仅手动触发
     inputs:
-      # 可选：添加手动触发时的自定义参数（如版本备注）
       build_note:
         description: 'Build note (optional)'
         required: false
@@ -19,13 +18,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate version
-        id: parse_version
-        run: |
-          COMMIT_NUM=$(git rev-list --count HEAD)
-          VERSION=$(echo "$COMMIT_NUM + 200 + 10000" | bc)
-          echo "Generated Version: $VERSION"
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+      # 👇 已删除：动态生成版本号的步骤（避免覆盖固定的888888）
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -61,13 +54,13 @@ jobs:
           echo 'org.gradle.jvmargs=-Xmx2048m' >> gradle.properties
           echo 'android.native.buildOutput=verbose' >> gradle.properties
           sed -i 's/org.gradle.configuration-cache=true//g' gradle.properties
-          ./gradlew clean assembleRelease
+          ./gradlew clean assembleRelease  # 直接构建，使用build.gradle中的固定版本号
           echo "BUILD_TOOL_VERSION=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)" >> $GITHUB_ENV
 
-      # 移除签名步骤，直接上传未签名 APK
       - name: Upload build artifact
         uses: actions/upload-artifact@v5
         with:
-          name: APatch-Unsigned-${{ steps.parse_version.outputs.VERSION }}
+          # 文件名中使用固定版本号888888，清晰识别
+          name: APatch-Unsigned-888888
           path: app/build/outputs/apk/release/*.apk
-          retention-days: 30  # 可选：设置 artifacts 保留时间（默认90天）
+          retention-days: 30
